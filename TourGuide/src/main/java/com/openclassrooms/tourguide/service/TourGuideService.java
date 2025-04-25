@@ -7,14 +7,7 @@ import com.openclassrooms.tourguide.user.UserReward;
 
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
-import java.util.ArrayList;
-import java.util.Date;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Locale;
-import java.util.Map;
-import java.util.Random;
-import java.util.UUID;
+import java.util.*;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -95,15 +88,62 @@ public class TourGuideService {
 		return visitedLocation;
 	}
 
+//	public List<Attraction> getNearByAttractions(VisitedLocation visitedLocation) {
+//		List<Attraction> nearbyAttractions = new ArrayList<>();
+//		for (Attraction attraction : gpsUtil.getAttractions()) {
+//			if (rewardsService.isWithinAttractionProximity(attraction, visitedLocation.location)) {
+//				nearbyAttractions.add(attraction);
+//			}
+//		}
+//
+//		return nearbyAttractions;
+//	}
+
+	/**
+	 * Retourne les 5 attractions les plus proches de l'emplacement donné, quelle que soit leur distance.
+	 * Utilise un min-heap pour une performance optimale avec une complexité de O(n log 5).
+	 *
+	 * @param visitedLocation Emplacement visité par l'utilisateur
+	 * @return Une liste de 5 attractions, triées de la plus proche à la plus éloignée
+	 */
 	public List<Attraction> getNearByAttractions(VisitedLocation visitedLocation) {
-		List<Attraction> nearbyAttractions = new ArrayList<>();
-		for (Attraction attraction : gpsUtil.getAttractions()) {
-			if (rewardsService.isWithinAttractionProximity(attraction, visitedLocation.location)) {
-				nearbyAttractions.add(attraction);
+		// Récupère toutes les attractions depuis gpsUtil
+		List<Attraction> allAttractions = gpsUtil.getAttractions();
+
+		// Créer un min-heap pour stocker les attractions avec leur distance
+		// Ce PriorityQueue est configuré pour trier par distance (la valeur dans Map.Entry)
+		// La plus petite distance sera à la tête de la file
+		PriorityQueue<Map.Entry<Attraction, Double>> nearestAttractions =
+				new PriorityQueue<>(5, Comparator.comparingDouble(Map.Entry::getValue));
+
+		// Parcourir toutes les attractions pour trouver les 5 plus proches
+		for (Attraction attraction : allAttractions) {
+			// Calculer la distance entre l'attraction et la position de l'utilisateur
+			double distance = rewardsService.getDistance(attraction, visitedLocation.location);
+
+			// Si on n'a pas encore 5 attractions dans le heap, ajouter simplement celle-ci
+			if (nearestAttractions.size() < 5) {
+				nearestAttractions.add(new AbstractMap.SimpleEntry<>(attraction, distance));
+			}
+			// Sinon, vérifier si cette attraction est plus proche que la plus éloignée des 5 actuelles
+			// peek() nous donne l'élément avec la valeur la plus petite (la plus courte distance)
+			else if (distance < nearestAttractions.peek().getValue()) {
+				nearestAttractions.poll(); // Enlever l'attraction avec la plus petite distance (la plus proche)
+				nearestAttractions.add(new AbstractMap.SimpleEntry<>(attraction, distance));
 			}
 		}
 
-		return nearbyAttractions;
+		// Convertir le PriorityQueue en liste
+		// Quand on vide le heap avec poll(), on obtient les éléments du plus proche au plus éloigné
+		List<Attraction> result = new ArrayList<>(5);
+		while (!nearestAttractions.isEmpty()) {
+			result.add(nearestAttractions.poll().getKey());
+		}
+
+		// Inverser la liste pour avoir les attractions dans l'ordre de la plus proche à la plus éloignée
+		// Nécessaire car un min-heap retourne les éléments dans l'ordre croissant (distance croissante)
+		Collections.reverse(result);
+		return result;
 	}
 
 	private void addShutDownHook() {
