@@ -5,6 +5,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import com.openclassrooms.tourguide.dto.NearbyAttractionDTO;
 import com.openclassrooms.tourguide.service.RewardsService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -54,55 +55,15 @@ public class TourGuideController {
      * Renvoie les informations détaillées sur chaque attraction
      *
      * @param userName Nom de l'utilisateur
-     * @return Liste d'objets JSON contenant les détails de chaque attraction
+     * @return Liste de DTOs contenant les détails de chaque attraction
      */
     @RequestMapping("/getNearbyAttractions")
-    public List<HashMap<String, Object>> getNearbyAttractions(@RequestParam String userName) {
-        // Récupérer l'utilisateur et sa dernière position connue
+    public List<NearbyAttractionDTO> getNearbyAttractions(@RequestParam String userName) {
+        // Récupérer l'utilisateur
         User user = getUser(userName);
-        VisitedLocation visitedLocation = tourGuideService.getUserLocation(user);
 
-        // Obtenir les 5 attractions les plus proches
-        List<Attraction> attractions = tourGuideService.getNearByAttractions(visitedLocation);
-
-        // Préparer la liste de résultats avec une capacité initiale de 5 pour éviter les redimensionnements
-        List<HashMap<String, Object>> nearbyAttractions = new ArrayList<>(5);
-
-        // Pour chaque attraction, créer un objet JSON avec toutes les informations demandées
-        for (Attraction attraction : attractions) {
-            // Calcule la distance entre l'utilisateur et l'attraction
-            double distance = rewardsService.getDistance(attraction, visitedLocation.location);
-            // Récupère les points de récompense pour cette attraction
-            int rewardPoints = rewardsService.getRewardPoints(attraction, user);
-
-            // Créer une HashMap avec les informations requises
-            // Capacité initiale de 5 pour les 5 propriétés
-            HashMap<String, Object> attractionData = new HashMap<>(5);
-            attractionData.put("name", attraction.attractionName);
-
-            // Coordonnées de l'attraction
-            attractionData.put("attractionLocation", Map.of(
-                    "lat", attraction.latitude,
-                    "long", attraction.longitude
-            ));
-
-            // Coordonnées de l'utilisateur
-            attractionData.put("userLocation", Map.of(
-                    "lat", visitedLocation.location.latitude,
-                    "long", visitedLocation.location.longitude
-            ));
-
-            // Distance entre l'utilisateur et l'attraction
-            attractionData.put("distance", distance);
-
-            // Points de récompense pour la visite de cette attraction
-            attractionData.put("rewardPoints", rewardPoints);
-
-            // Ajoute cet objet à la liste des résultats
-            nearbyAttractions.add(attractionData);
-        }
-
-        return nearbyAttractions;
+        // Appeler la méthode du service qui encapsule toute la logique métier
+        return tourGuideService.getNearbyAttractionsWithDetails(user);
     }
     
     @RequestMapping("/getRewards") 

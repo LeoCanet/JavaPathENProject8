@@ -1,5 +1,6 @@
 package com.openclassrooms.tourguide.service;
 
+import com.openclassrooms.tourguide.dto.NearbyAttractionDTO;
 import com.openclassrooms.tourguide.helper.InternalTestHelper;
 import com.openclassrooms.tourguide.tracker.Tracker;
 import com.openclassrooms.tourguide.user.User;
@@ -88,16 +89,44 @@ public class TourGuideService {
 		return visitedLocation;
 	}
 
-//	public List<Attraction> getNearByAttractions(VisitedLocation visitedLocation) {
-//		List<Attraction> nearbyAttractions = new ArrayList<>();
-//		for (Attraction attraction : gpsUtil.getAttractions()) {
-//			if (rewardsService.isWithinAttractionProximity(attraction, visitedLocation.location)) {
-//				nearbyAttractions.add(attraction);
-//			}
-//		}
-//
-//		return nearbyAttractions;
-//	}
+	/**
+	 * Obtient les 5 attractions les plus proches de l'utilisateur avec toutes les informations détaillées.
+	 * Cette méthode encapsule la logique de calcul des distances et des points de récompense.
+	 *
+	 * @param user Utilisateur pour lequel on cherche les attractions
+	 * @return Liste de DTOs contenant les informations détaillées sur chaque attraction
+	 */
+	public List<NearbyAttractionDTO> getNearbyAttractionsWithDetails(User user) {
+		// Obtenir la dernière position de l'utilisateur
+		VisitedLocation visitedLocation = getUserLocation(user);
+
+		// Obtenir les 5 attractions les plus proches
+		List<Attraction> nearbyAttractions = getNearByAttractions(visitedLocation);
+
+		// Créer la liste de résultats sous forme de DTOs
+		List<NearbyAttractionDTO> result = new ArrayList<>(5);
+
+		// Pour chaque attraction, créer un DTO avec toutes les informations demandées
+		for (Attraction attraction : nearbyAttractions) {
+			// Calcule la distance entre l'utilisateur et l'attraction
+			double distance = rewardsService.getDistance(attraction, visitedLocation.location);
+			// Récupère les points de récompense pour cette attraction
+			int rewardPoints = rewardsService.getRewardPoints(attraction, user);
+
+			// Créer un DTO et l'ajouter à la liste
+			NearbyAttractionDTO dto = new NearbyAttractionDTO(
+					attraction.attractionName,
+					new Location(attraction.latitude, attraction.longitude),
+					visitedLocation.location,
+					distance,
+					rewardPoints
+			);
+
+			result.add(dto);
+		}
+
+		return result;
+	}
 
 	/**
 	 * Retourne les 5 attractions les plus proches de l'emplacement donné, quelle que soit leur distance.
