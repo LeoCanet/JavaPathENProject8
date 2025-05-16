@@ -9,6 +9,10 @@ import com.openclassrooms.tourguide.user.UserReward;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -33,10 +37,36 @@ public class TourGuideService {
 	public final Tracker tracker;
 	boolean testMode = true;
 
+	// ExecutorService pour la parallélisation
+	private final ExecutorService executorService;
+
+	// Cache pour les emplacements récents des utilisateurs
+	private final Map<UUID, CachedLocation> locationCache = new ConcurrentHashMap<>();
+
+	// Classe interne pour représenter un emplacement mis en cache avec un timestamp
+	private static class CachedLocation {
+		private final VisitedLocation location;
+		private final long timestamp;
+
+		public CachedLocation(VisitedLocation location) {
+			this.location = location;
+			this.timestamp = System.currentTimeMillis();
+		}
+
+		// Le cache est valide pendant 5 minutes (correspondant à l'intervalle de tracking)
+		public boolean isValid() {
+			return System.currentTimeMillis() - timestamp < 5 * 60 * 1000; // 5 minutes en millisecondes
+		}
+	}
+
 	public TourGuideService(GpsUtil gpsUtil, RewardsService rewardsService) {
 		this.gpsUtil = gpsUtil;
 		this.rewardsService = rewardsService;
-		
+
+		// Optimiser le nombre de threads en fonction des cœurs disponibles
+		int coreCount = Runtime.getRuntime().availableProcessors();
+		this.executorService = Executors.newFixedThreadPool(coreCount * 8); // 8 threads par cœur
+
 		Locale.setDefault(Locale.US);
 
 		if (testMode) {
@@ -54,9 +84,18 @@ public class TourGuideService {
 	}
 
 	public VisitedLocation getUserLocation(User user) {
-		VisitedLocation visitedLocation = (user.getVisitedLocations().size() > 0) ? user.getLastVisitedLocation()
-				: trackUserLocation(user);
-		return visitedLocation;
+		// Vérifier si l'utilisateur a des emplacements visités
+		if (user.getVisitedLocations().size() > 0) {
+			// Vérifier le cache d'abord
+			CachedLocation cached = locationCache.get(user.getUserId());
+			if (cached != null && cached.isValid()) {
+				return cached.location;
+			}
+			// Si pas de cache valide, utiliser le dernier emplacement visité
+			return user.getLastVisitedLocation();
+		}
+		// Si aucun emplacement visité, traquer l'emplacement et attendre le résultat
+		return trackUserLocation(user).join();
 	}
 
 	public User getUser(String userName) {
@@ -64,7 +103,7 @@ public class TourGuideService {
 	}
 
 	public List<User> getAllUsers() {
-		return internalUserMap.values().stream().collect(Collectors.toList());
+		return new ArrayList<>(internalUserMap.values());
 	}
 
 	public void addUser(User user) {
@@ -82,19 +121,26 @@ public class TourGuideService {
 		return providers;
 	}
 
-	public VisitedLocation trackUserLocation(User user) {
-		VisitedLocation visitedLocation = gpsUtil.getUserLocation(user.getUserId());
-		user.addToVisitedLocations(visitedLocation);
-		rewardsService.calculateRewards(user);
-		return visitedLocation;
+	/**
+	 * Version asynchrone de trackUserLocation qui utilise CompletableFuture pour la parallélisation.
+	 */
+	public CompletableFuture<VisitedLocation> trackUserLocation(User user) {
+		return CompletableFuture.supplyAsync(() -> {
+			VisitedLocation visitedLocation = gpsUtil.getUserLocation(user.getUserId());
+			user.addToVisitedLocations(visitedLocation);
+			locationCache.put(user.getUserId(), new CachedLocation(visitedLocation));
+			return visitedLocation;
+		}, executorService).thenCompose(visitedLocation -> {
+			// Enchaîner le calcul des récompenses de manière asynchrone
+			return CompletableFuture.supplyAsync(() -> {
+				rewardsService.calculateRewards(user);
+				return visitedLocation;
+			}, executorService);
+		});
 	}
 
 	/**
 	 * Obtient les 5 attractions les plus proches de l'utilisateur avec toutes les informations détaillées.
-	 * Cette méthode encapsule la logique de calcul des distances et des points de récompense.
-	 *
-	 * @param user Utilisateur pour lequel on cherche les attractions
-	 * @return Liste de DTOs contenant les informations détaillées sur chaque attraction
 	 */
 	public List<NearbyAttractionDTO> getNearbyAttractionsWithDetails(User user) {
 		// Obtenir la dernière position de l'utilisateur
@@ -130,63 +176,50 @@ public class TourGuideService {
 
 	/**
 	 * Retourne les 5 attractions les plus proches de l'emplacement donné, quelle que soit leur distance.
-	 * Utilise un min-heap pour une performance optimale avec une complexité de O(n log 5).
-	 *
-	 * @param visitedLocation Emplacement visité par l'utilisateur
-	 * @return Une liste de 5 attractions, triées de la plus proche à la plus éloignée
 	 */
 	public List<Attraction> getNearByAttractions(VisitedLocation visitedLocation) {
-		// Récupère toutes les attractions depuis gpsUtil
 		List<Attraction> allAttractions = gpsUtil.getAttractions();
 
-		// Créer un min-heap pour stocker les attractions avec leur distance
-		// Ce PriorityQueue est configuré pour trier par distance (la valeur dans Map.Entry)
-		// La plus petite distance sera à la tête de la file
+		// Utiliser PriorityQueue pour trouver efficacement les 5 attractions les plus proches
 		PriorityQueue<Map.Entry<Attraction, Double>> nearestAttractions =
 				new PriorityQueue<>(5, Comparator.comparingDouble(Map.Entry::getValue));
 
-		// Parcourir toutes les attractions pour trouver les 5 plus proches
 		for (Attraction attraction : allAttractions) {
-			// Calculer la distance entre l'attraction et la position de l'utilisateur
 			double distance = rewardsService.getDistance(attraction, visitedLocation.location);
-
-			// Si on n'a pas encore 5 attractions dans le heap, ajouter simplement celle-ci
 			if (nearestAttractions.size() < 5) {
 				nearestAttractions.add(new AbstractMap.SimpleEntry<>(attraction, distance));
-			}
-			// Sinon, vérifier si cette attraction est plus proche que la plus éloignée des 5 actuelles
-			// peek() nous donne l'élément avec la valeur la plus petite (la plus courte distance)
-			else if (distance < nearestAttractions.peek().getValue()) {
-				nearestAttractions.poll(); // Enlever l'attraction avec la plus petite distance (la plus proche)
+			} else if (distance < nearestAttractions.peek().getValue()) {
+				nearestAttractions.poll();
 				nearestAttractions.add(new AbstractMap.SimpleEntry<>(attraction, distance));
 			}
 		}
 
-		// Convertir le PriorityQueue en liste
-		// Quand on vide le heap avec poll(), on obtient les éléments du plus proche au plus éloigné
 		List<Attraction> result = new ArrayList<>(5);
 		while (!nearestAttractions.isEmpty()) {
 			result.add(nearestAttractions.poll().getKey());
 		}
-
-		// Inverser la liste pour avoir les attractions dans l'ordre de la plus proche à la plus éloignée
-		// Nécessaire car un min-heap retourne les éléments dans l'ordre croissant (distance croissante)
 		Collections.reverse(result);
 		return result;
+	}
+
+	// Méthode pour fermer proprement l'ExecutorService
+	public void shutdownExecutorService() {
+		executorService.shutdown();
 	}
 
 	private void addShutDownHook() {
 		Runtime.getRuntime().addShutdownHook(new Thread() {
 			public void run() {
 				tracker.stopTracking();
+				shutdownExecutorService();
 			}
 		});
 	}
 
 	/**********************************************************************************
-	 * 
+	 *
 	 * Methods Below: For Internal Testing
-	 * 
+	 *
 	 **********************************************************************************/
 	private static final String tripPricerApiKey = "test-server-api-key";
 	// Database connection will be used for external users, but for testing purposes
@@ -229,5 +262,4 @@ public class TourGuideService {
 		LocalDateTime localDateTime = LocalDateTime.now().minusDays(new Random().nextInt(30));
 		return Date.from(localDateTime.toInstant(ZoneOffset.UTC));
 	}
-
 }
