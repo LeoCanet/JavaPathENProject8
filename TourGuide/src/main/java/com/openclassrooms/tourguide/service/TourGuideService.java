@@ -10,10 +10,8 @@ import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 import org.slf4j.Logger;
@@ -38,26 +36,7 @@ public class TourGuideService {
 	boolean testMode = true;
 
 	// ExecutorService pour la parallélisation
-	private final ExecutorService executorService;
-
-	// Cache pour les emplacements récents des utilisateurs
-	private final Map<UUID, CachedLocation> locationCache = new ConcurrentHashMap<>();
-
-	// Classe interne pour représenter un emplacement mis en cache avec un timestamp
-	private static class CachedLocation {
-		private final VisitedLocation location;
-		private final long timestamp;
-
-		public CachedLocation(VisitedLocation location) {
-			this.location = location;
-			this.timestamp = System.currentTimeMillis();
-		}
-
-		// Le cache est valide pendant 5 minutes (correspondant à l'intervalle de tracking)
-		public boolean isValid() {
-			return System.currentTimeMillis() - timestamp < 5 * 60 * 1000; // 5 minutes en millisecondes
-		}
-	}
+	public final ExecutorService executorService;
 
 	public TourGuideService(GpsUtil gpsUtil, RewardsService rewardsService) {
 		this.gpsUtil = gpsUtil;
@@ -84,17 +63,11 @@ public class TourGuideService {
 	}
 
 	public VisitedLocation getUserLocation(User user) {
-		// Vérifier si l'utilisateur a des emplacements visités
-		if (user.getVisitedLocations().size() > 0) {
-			// Vérifier le cache d'abord
-			CachedLocation cached = locationCache.get(user.getUserId());
-			if (cached != null && cached.isValid()) {
-				return cached.location;
-			}
-			// Si pas de cache valide, utiliser le dernier emplacement visité
+		// Si l'utilisateur a des emplacements visités, utiliser le dernier
+		if (!user.getVisitedLocations().isEmpty()) {
 			return user.getLastVisitedLocation();
 		}
-		// Si aucun emplacement visité, traquer l'emplacement et attendre le résultat
+		// Sinon, traquer l'emplacement et attendre le résultat
 		return trackUserLocation(user).join();
 	}
 
@@ -113,7 +86,7 @@ public class TourGuideService {
 	}
 
 	public List<Provider> getTripDeals(User user) {
-		int cumulatativeRewardPoints = user.getUserRewards().stream().mapToInt(i -> i.getRewardPoints()).sum();
+		int cumulatativeRewardPoints = user.getUserRewards().stream().mapToInt(UserReward::getRewardPoints).sum();
 		List<Provider> providers = tripPricer.getPrice(tripPricerApiKey, user.getUserId(),
 				user.getUserPreferences().getNumberOfAdults(), user.getUserPreferences().getNumberOfChildren(),
 				user.getUserPreferences().getTripDuration(), cumulatativeRewardPoints);
@@ -122,18 +95,38 @@ public class TourGuideService {
 	}
 
 	/**
-	 * Version asynchrone de trackUserLocation qui utilise CompletableFuture pour la parallélisation.
+	 * Suit la position d'un utilisateur et calcule ses récompenses de manière asynchrone.
+	 * <p>
+	 * Cette méthode effectue deux opérations principales de façon asynchrone :
+	 * 1. Obtenir et enregistrer la position actuelle de l'utilisateur via gpsUtil
+	 * 2. Calculer les récompenses appropriées pour l'utilisateur basées sur sa nouvelle position
+	 * <p>
+	 * L'utilisation de CompletableFuture permet à ces opérations potentiellement lentes
+	 * de s'exécuter en parallèle pour de nombreux utilisateurs, améliorant considérablement
+	 * les performances lors du traitement d'un grand nombre d'utilisateurs simultanément.
+	 *
+	 * @param user L'utilisateur dont la position doit être suivie
+	 * @return Un CompletableFuture contenant la position visitée,
+	 *         qui sera complété une fois le suivi et le calcul des récompenses terminés
 	 */
 	public CompletableFuture<VisitedLocation> trackUserLocation(User user) {
+		// Première étape : récupérer et enregistrer la position de l'utilisateur
 		return CompletableFuture.supplyAsync(() -> {
+			// Appel à gpsUtil pour obtenir la position actuelle (opération potentiellement lente)
 			VisitedLocation visitedLocation = gpsUtil.getUserLocation(user.getUserId());
+
+			// Enregistrer cette position dans l'historique de l'utilisateur
 			user.addToVisitedLocations(visitedLocation);
-			locationCache.put(user.getUserId(), new CachedLocation(visitedLocation));
+
 			return visitedLocation;
 		}, executorService).thenCompose(visitedLocation -> {
-			// Enchaîner le calcul des récompenses de manière asynchrone
+			// Deuxième étape : calculer les récompenses basées sur la nouvelle position
+			// thenCompose permet d'enchaîner une autre opération asynchrone tout en gardant le flux
 			return CompletableFuture.supplyAsync(() -> {
+				// Calculer les récompenses pour l'utilisateur (opération potentiellement lente)
 				rewardsService.calculateRewards(user);
+
+				// Retourner la position initialement obtenue
 				return visitedLocation;
 			}, executorService);
 		});
