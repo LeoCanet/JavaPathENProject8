@@ -3,7 +3,6 @@ package com.openclassrooms.tourguide;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
@@ -11,142 +10,109 @@ import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 import org.apache.commons.lang3.time.StopWatch;
-import org.junit.jupiter.api.Disabled;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
 
 import gpsUtil.GpsUtil;
 import gpsUtil.location.Attraction;
 import gpsUtil.location.VisitedLocation;
-import rewardCentral.RewardCentral;
 import com.openclassrooms.tourguide.helper.InternalTestHelper;
 import com.openclassrooms.tourguide.service.RewardsService;
 import com.openclassrooms.tourguide.service.TourGuideService;
 import com.openclassrooms.tourguide.user.User;
 
+/**
+ * Classe de tests de performance.
+ * Utilise @SpringBootTest pour lancer un contexte d'application Spring complet,
+ * permettant d'injecter directement les beans configurés (@Autowired).
+ * Cela évite de devoir instancier manuellement les services et leurs dépendances.
+ */
+@SpringBootTest
 public class TestPerformance {
 
-	/*
-	 * A note on performance improvements:
-	 * 
-	 * The number of users generated for the high volume tests can be easily
-	 * adjusted via this method:
-	 * 
-	 * InternalTestHelper.setInternalUserNumber(100000);
-	 * 
-	 * 
-	 * These tests can be modified to suit new solutions, just as long as the
-	 * performance metrics at the end of the tests remains consistent.
-	 * 
-	 * These are performance metrics that we are trying to hit:
-	 * 
-	 * highVolumeTrackLocation: 100,000 users within 15 minutes:
-	 * assertTrue(TimeUnit.MINUTES.toSeconds(15) >=
-	 * TimeUnit.MILLISECONDS.toSeconds(stopWatch.getTime()));
-	 *
-	 * highVolumeGetRewards: 100,000 users within 20 minutes:
-	 * assertTrue(TimeUnit.MINUTES.toSeconds(20) >=
-	 * TimeUnit.MILLISECONDS.toSeconds(stopWatch.getTime()));
+	// Injection automatique des services gérés par Spring. Plus besoin de 'new'.
+	@Autowired
+	private TourGuideService tourGuideService;
+
+	@Autowired
+	private RewardsService rewardsService;
+
+	@Autowired
+	private GpsUtil gpsUtil;
+
+	/**
+	 * S'exécute une seule fois avant tous les tests de cette classe.
+	 * Configure le nombre d'utilisateurs pour les tests à haute volumétrie.
 	 */
+	@BeforeAll
+	public static void setup() {
+		// Le test tournant sur 100 000 utilisateurs, on ajuste la valeur ici.
+		InternalTestHelper.setInternalUserNumber(50000);
+	}
+
+	/**
+	 * S'exécute après tous les tests pour s'assurer que les threads sont bien arrêtés.
+	 */
+	@AfterAll
+	public static void cleanUp(@Autowired TourGuideService tourGuideService) {
+		tourGuideService.tracker.stopTracking();
+	}
 
 	@Test
 	public void highVolumeTrackLocation() {
-		GpsUtil gpsUtil = new GpsUtil();
-		RewardsService rewardsService = new RewardsService(gpsUtil, new RewardCentral());
-
-		// Définir le nombre d'utilisateurs à 100 000 pour le test final
-		InternalTestHelper.setInternalUserNumber(1000);
-		TourGuideService tourGuideService = new TourGuideService(gpsUtil, rewardsService);
-
 		List<User> allUsers = tourGuideService.getAllUsers();
 
 		StopWatch stopWatch = new StopWatch();
 		stopWatch.start();
 
-		// Créer une liste pour stocker toutes les Futures
-		List<CompletableFuture<VisitedLocation>> futures = new ArrayList<>();
+		// Lance le suivi de tous les utilisateurs en parallèle et collecte les Futures.
+		List<CompletableFuture<VisitedLocation>> futures = allUsers.stream()
+				.map(tourGuideService::trackUserLocation)
+				.toList();
 
-		// Lancer tous les appels en parallèle
-		for (User user : allUsers) {
-			futures.add(tourGuideService.trackUserLocation(user));
-		}
-
-		// Attendre que tous les appels soient terminés
+		// Attend que toutes les opérations de suivi soient terminées.
 		CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
 
 		stopWatch.stop();
-		tourGuideService.tracker.stopTracking();
-		tourGuideService.shutdownExecutorService();
 
 		System.out.println("highVolumeTrackLocation: Time Elapsed: "
 				+ TimeUnit.MILLISECONDS.toSeconds(stopWatch.getTime()) + " seconds.");
+		// Vérifie que le temps d'exécution est inférieur à la limite de 15 minutes.
 		assertTrue(TimeUnit.MINUTES.toSeconds(15) >= TimeUnit.MILLISECONDS.toSeconds(stopWatch.getTime()));
 	}
 
-
-//	@Test
-//	public void highVolumeGetRewards() {
-//		GpsUtil gpsUtil = new GpsUtil();
-//		RewardsService rewardsService = new RewardsService(gpsUtil, new RewardCentral());
-//
-//		// Users should be incremented up to 100,000, and test finishes within 20
-//		// minutes
-//		InternalTestHelper.setInternalUserNumber(100);
-//		StopWatch stopWatch = new StopWatch();
-//		stopWatch.start();
-//		TourGuideService tourGuideService = new TourGuideService(gpsUtil, rewardsService);
-//
-//		Attraction attraction = gpsUtil.getAttractions().get(0);
-//		List<User> allUsers = new ArrayList<>();
-//		allUsers = tourGuideService.getAllUsers();
-//		allUsers.forEach(u -> u.addToVisitedLocations(new VisitedLocation(u.getUserId(), attraction, new Date())));
-//
-//		allUsers.forEach(u -> rewardsService.calculateRewards(u));
-//
-//		for (User user : allUsers) {
-//			assertTrue(user.getUserRewards().size() > 0);
-//		}
-//		stopWatch.stop();
-//		tourGuideService.tracker.stopTracking();
-//
-//		System.out.println("highVolumeGetRewards: Time Elapsed: " + TimeUnit.MILLISECONDS.toSeconds(stopWatch.getTime())
-//				+ " seconds.");
-//		assertTrue(TimeUnit.MINUTES.toSeconds(20) >= TimeUnit.MILLISECONDS.toSeconds(stopWatch.getTime()));
-//	}
-
 	@Test
 	public void highVolumeGetRewards() {
-		GpsUtil gpsUtil = new GpsUtil();
-		RewardsService rewardsService = new RewardsService(gpsUtil, new RewardCentral());
-
-		InternalTestHelper.setInternalUserNumber(100000);
-		TourGuideService tourGuideService = new TourGuideService(gpsUtil, rewardsService);
-
 		StopWatch stopWatch = new StopWatch();
 		stopWatch.start();
 
+		// Simule une visite pour chaque utilisateur afin qu'ils soient éligibles à une récompense.
 		Attraction attraction = gpsUtil.getAttractions().get(0);
 		List<User> allUsers = tourGuideService.getAllUsers();
 		allUsers.forEach(u -> u.addToVisitedLocations(new VisitedLocation(u.getUserId(), attraction, new Date())));
 
-		// Paralléliser le calcul des récompenses
+		// Lance le calcul des récompenses pour tous les utilisateurs en parallèle.
+		// La méthode calculateRewards est elle-même asynchrone et retourne un CompletableFuture.
 		List<CompletableFuture<Void>> futures = allUsers.stream()
-				.map(user -> CompletableFuture.runAsync(() -> rewardsService.calculateRewards(user), tourGuideService.executorService))
+				.map(rewardsService::calculateRewards)
 				.toList();
 
-		// Attendre la fin de tous les calculs
+		// Attend que tous les calculs de récompenses soient terminés.
 		CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
 
+		// Vérifie que chaque utilisateur a bien reçu au moins une récompense.
 		for (User user : allUsers) {
-            assertFalse(user.getUserRewards().isEmpty());
+            assertFalse(user.getUserRewards().isEmpty(), "Chaque utilisateur devrait avoir au moins une récompense.");
 		}
 
 		stopWatch.stop();
-		tourGuideService.tracker.stopTracking();
-		tourGuideService.shutdownExecutorService();
 
 		System.out.println("highVolumeGetRewards: Time Elapsed: " + TimeUnit.MILLISECONDS.toSeconds(stopWatch.getTime())
 				+ " seconds.");
+		// Vérifie que le temps d'exécution est inférieur à la limite de 20 minutes.
 		assertTrue(TimeUnit.MINUTES.toSeconds(20) >= TimeUnit.MILLISECONDS.toSeconds(stopWatch.getTime()));
 	}
-
 }

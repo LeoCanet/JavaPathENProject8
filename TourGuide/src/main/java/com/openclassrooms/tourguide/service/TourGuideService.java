@@ -34,17 +34,13 @@ public class TourGuideService {
 	private final TripPricer tripPricer = new TripPricer();
 	public final Tracker tracker;
 	boolean testMode = true;
-
 	// ExecutorService pour la parallélisation
-	public final ExecutorService executorService;
+	private final ExecutorService executorService;
 
-	public TourGuideService(GpsUtil gpsUtil, RewardsService rewardsService) {
+	public TourGuideService(GpsUtil gpsUtil, RewardsService rewardsService, ExecutorService executorService) {
 		this.gpsUtil = gpsUtil;
 		this.rewardsService = rewardsService;
-
-		// Optimiser le nombre de threads en fonction des cœurs disponibles
-		int coreCount = Runtime.getRuntime().availableProcessors();
-		this.executorService = Executors.newFixedThreadPool(coreCount * 8); // 8 threads par cœur
+		this.executorService = executorService;
 
 		Locale.setDefault(Locale.US);
 
@@ -117,18 +113,12 @@ public class TourGuideService {
 
 			// Enregistrer cette position dans l'historique de l'utilisateur
 			user.addToVisitedLocations(visitedLocation);
-
+//			System.out.println("GPS Util" + Thread.currentThread().getName());
 			return visitedLocation;
 		}, executorService).thenCompose(visitedLocation -> {
 			// Deuxième étape : calculer les récompenses basées sur la nouvelle position
 			// thenCompose permet d'enchaîner une autre opération asynchrone tout en gardant le flux
-			return CompletableFuture.supplyAsync(() -> {
-				// Calculer les récompenses pour l'utilisateur (opération potentiellement lente)
-				rewardsService.calculateRewards(user);
-
-				// Retourner la position initialement obtenue
-				return visitedLocation;
-			}, executorService);
+			return rewardsService.calculateRewards(user).thenApply(v -> visitedLocation);
 		});
 	}
 
@@ -255,4 +245,13 @@ public class TourGuideService {
 		LocalDateTime localDateTime = LocalDateTime.now().minusDays(new Random().nextInt(30));
 		return Date.from(localDateTime.toInstant(ZoneOffset.UTC));
 	}
+
+	/**
+	 * Méthode utilitaire réservée aux tests pour vider la carte des utilisateurs internes.
+	 * Permet d'isoler les tests les uns des autres en garantissant un état propre.
+	 */
+	public void clearInternalUsers() {
+		internalUserMap.clear();
+	}
+
 }

@@ -2,7 +2,9 @@ package com.openclassrooms.tourguide.service;
 
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.ExecutorService;
 import java.util.stream.Collectors;
 
 import org.springframework.stereotype.Service;
@@ -25,10 +27,12 @@ public class RewardsService {
 	private int attractionProximityRange = 200;
 	private final GpsUtil gpsUtil;
 	private final RewardCentral rewardsCentral;
+	private final ExecutorService executorService;
 
-	public RewardsService(GpsUtil gpsUtil, RewardCentral rewardCentral) {
+	public RewardsService(GpsUtil gpsUtil, RewardCentral rewardCentral, ExecutorService executorService) {
 		this.gpsUtil = gpsUtil;
 		this.rewardsCentral = rewardCentral;
+		this.executorService = executorService;
 	}
 
 	public void setProximityBuffer(int proximityBuffer) {
@@ -44,33 +48,29 @@ public class RewardsService {
 	 * Cette version optimisée évite les boucles inutiles et les vérifications redondantes.
 	 * Elle est conçue pour être appelée en parallèle pour de nombreux utilisateurs.
 	 */
-	public void calculateRewards(User user) {
-		// Utiliser une copie pour éviter les ConcurrentModificationException si la liste originale est modifiée
-		List<VisitedLocation> userLocations = new CopyOnWriteArrayList<>(user.getVisitedLocations());
-		List<Attraction> attractions = gpsUtil.getAttractions();
+	public CompletableFuture<Void> calculateRewards(User user) {
+		return CompletableFuture.runAsync(() -> {
+			// La logique optimisée que nous avons écrite précédemment
+			List<VisitedLocation> userLocations = new CopyOnWriteArrayList<>(user.getVisitedLocations());
+			List<Attraction> attractions = gpsUtil.getAttractions();
 
-		// Créer un Set des noms d'attractions déjà récompensées pour une vérification O(1)
-		Set<String> rewardedAttractions = user.getUserRewards().stream()
-				.map(r -> r.attraction.attractionName)
-				.collect(Collectors.toSet());
+			Set<String> rewardedAttractions = user.getUserRewards().stream()
+					.map(r -> r.attraction.attractionName)
+					.collect(Collectors.toSet());
 
-		for (VisitedLocation visitedLocation : userLocations) {
-			for (Attraction attraction : attractions) {
-				// Vérifier si l'attraction a déjà été récompensée
-				if (rewardedAttractions.contains(attraction.attractionName)) {
-					continue; // Passer à la suivante
-				}
-
-				if (nearAttraction(visitedLocation, attraction)) {
-					// Si l'utilisateur est proche, ajouter la récompense
-					int rewardPoints = getRewardPoints(attraction, user);
-					user.addUserReward(new UserReward(visitedLocation, attraction, rewardPoints));
-
-					// Ajouter le nom à notre set pour ne pas la recalculer dans cette même exécution
-					rewardedAttractions.add(attraction.attractionName);
+			for (VisitedLocation visitedLocation : userLocations) {
+				for (Attraction attraction : attractions) {
+					if (rewardedAttractions.contains(attraction.attractionName)) {
+						continue;
+					}
+					if (nearAttraction(visitedLocation, attraction)) {
+						int rewardPoints = getRewardPoints(attraction, user);
+						user.addUserReward(new UserReward(visitedLocation, attraction, rewardPoints));
+						rewardedAttractions.add(attraction.attractionName);
+					}
 				}
 			}
-		}
+		}, executorService); // Utilise l'executor injecté
 	}
 
 
