@@ -30,7 +30,7 @@ jobs:
       run: mvn -B package --file TourGuide/pom.xml -DskipTests
 
     - name: Upload JAR artifact
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: tourguide-jar
         path: TourGuide/target/tourguide-0.0.1-SNAPSHOT.jar
