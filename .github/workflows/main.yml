@@ -1,0 +1,36 @@
+name: Java CI with Maven
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+
+    - name: Set up JDK 17
+      uses: actions/setup-java@v3
+      with:
+        java-version: '17'
+        distribution: 'temurin'
+
+    - name: Compile
+      run: mvn -B compile --file TourGuide/pom.xml
+
+    - name: Run unit tests (excluding performance tests)
+      run: mvn -B test --file TourGuide/pom.xml -Dtest="!com.openclassrooms.tourguide.TestPerformance"
+
+    - name: Build JAR
+      run: mvn -B package --file TourGuide/pom.xml -DskipTests
+
+    - name: Upload JAR artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: tourguide-jar
+        path: TourGuide/target/tourguide-0.0.1-SNAPSHOT.jar
