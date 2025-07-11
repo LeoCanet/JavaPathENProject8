@@ -40,16 +40,6 @@ public class TourGuideController {
     	return tourGuideService.getUserLocation(getUser(userName));
     }
     
-    //  TODO: Change this method to no longer return a List of Attractions.
- 	//  Instead: Get the closest five tourist attractions to the user - no matter how far away they are.
- 	//  Return a new JSON object that contains:
-    	// Name of Tourist attraction, 
-        // Tourist attractions lat/long, 
-        // The user's location lat/long, 
-        // The distance in miles between the user's location and each of the attractions.
-        // The reward points for visiting each Attraction.
-        //    Note: Attraction reward points can be gathered from RewardsCentral
-
     /**
      * Point d'entrée API pour récupérer les 5 attractions les plus proches d'un utilisateur.
      * Renvoie les informations détaillées sur chaque attraction
