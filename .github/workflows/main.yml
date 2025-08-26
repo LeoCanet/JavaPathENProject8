@@ -1,36 +1,45 @@
+# Pipeline d'intégration continue pour TourGuide
+# Compile, teste et génère l'artefact JAR déployable
 name: Java CI with Maven
 
+# Déclenchement automatique sur les changements de code
 on:
   push:
-    branches: [ "master" ]
+    branches: [ "master" ]    # Validation des commits directs
   pull_request:
-    branches: [ "master" ]
+    branches: [ "master" ]    # Quality gate avant merge
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest    # Environnement Linux stable et économique
 
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v3
+      # Récupération du code source
+      - name: Checkout repository
+        uses: actions/checkout@v3
 
-    - name: Set up JDK 17
-      uses: actions/setup-java@v3
-      with:
-        java-version: '17'
-        distribution: 'temurin'
+      # Configuration de l'environnement Java 17 (LTS)
+      - name: Set up JDK 17
+        uses: actions/setup-java@v3
+        with:
+          java-version: '17'
+          distribution: 'temurin'  # Distribution OpenJDK recommandée
 
-    - name: Compile
-      run: mvn -B compile --file TourGuide/pom.xml
+      # Compilation du code source
+      - name: Compile
+        run: mvn -B compile --file TourGuide/pom.xml
 
-    - name: Run unit tests (excluding performance tests)
-      run: mvn -B test --file TourGuide/pom.xml -Dtest="!com.openclassrooms.tourguide.TestPerformance"
+      # Tests unitaires (performance tests exclus pour optimiser le temps CI)
+      - name: Run unit tests (excluding performance tests)
+        run: mvn -B test --file TourGuide/pom.xml -Dtest="!com.openclassrooms.tourguide.TestPerformance"
 
-    - name: Build JAR
-      run: mvn -B package --file TourGuide/pom.xml -DskipTests
+      # Construction du JAR exécutable
+      - name: Build JAR
+        run: mvn -B package --file TourGuide/pom.xml -DskipTests
 
-    - name: Upload JAR artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: tourguide-jar
-        path: TourGuide/target/tourguide-0.0.1-SNAPSHOT.jar
+      # Archivage de l'artefact pour déploiement
+      - name: Upload JAR artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tourguide-jar
+          path: TourGuide/target/tourguide-0.0.1-SNAPSHOT.jar
