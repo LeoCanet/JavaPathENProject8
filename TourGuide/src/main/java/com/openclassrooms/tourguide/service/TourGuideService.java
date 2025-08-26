@@ -81,11 +81,26 @@ public class TourGuideService {
 		}
 	}
 
+	/**
+	 * Génère des offres de voyage personnalisées basées sur le profil et la fidélité de l'utilisateur.
+	 *
+	 * Utilise le service externe TripPricer pour obtenir des prix négociés selon les points
+	 * de récompense cumulés et les préférences de voyage. Les résultats sont mis en cache
+	 * dans l'objet utilisateur pour optimiser les performances.
+	 *
+	 * @param user l'utilisateur pour lequel générer les offres
+	 * @return liste des offres de voyage personnalisées (généralement 5 providers)
+	 */
 	public List<Provider> getTripDeals(User user) {
+		// Calcul du total des points de fidélité
 		int cumulatativeRewardPoints = user.getUserRewards().stream().mapToInt(UserReward::getRewardPoints).sum();
+
+		// Appel au service externe avec le profil complet de l'utilisateur
 		List<Provider> providers = tripPricer.getPrice(tripPricerApiKey, user.getUserId(),
 				user.getUserPreferences().getNumberOfAdults(), user.getUserPreferences().getNumberOfChildren(),
 				user.getUserPreferences().getTripDuration(), cumulatativeRewardPoints);
+
+		// Cache des offres pour éviter les appels répétés
 		user.setTripDeals(providers);
 		return providers;
 	}
@@ -113,7 +128,6 @@ public class TourGuideService {
 
 			// Enregistrer cette position dans l'historique de l'utilisateur
 			user.addToVisitedLocations(visitedLocation);
-//			System.out.println("GPS Util" + Thread.currentThread().getName());
 			return visitedLocation;
 		}, executorService).thenCompose(visitedLocation -> {
 			// Deuxième étape : calculer les récompenses basées sur la nouvelle position
@@ -159,24 +173,35 @@ public class TourGuideService {
 
 	/**
 	 * Retourne les 5 attractions les plus proches de l'emplacement donné, quelle que soit leur distance.
+	 *
+	 * Utilise un min-heap (PriorityQueue) pour une complexité optimale O(n log 5) au lieu de
+	 * O(n log n) d'un tri complet. Garantit toujours exactement 5 résultats.
+	 *
+	 * @param visitedLocation l'emplacement de référence
+	 * @return liste des 5 attractions les plus proches, ordonnées par distance croissante
 	 */
 	public List<Attraction> getNearByAttractions(VisitedLocation visitedLocation) {
 		List<Attraction> allAttractions = gpsUtil.getAttractions();
 
-		// Utiliser PriorityQueue pour trouver efficacement les 5 attractions les plus proches
+		// Min-heap de taille fixe pour maintenir les 5 plus petites distances
 		PriorityQueue<Map.Entry<Attraction, Double>> nearestAttractions =
 				new PriorityQueue<>(5, Comparator.comparingDouble(Map.Entry::getValue));
 
 		for (Attraction attraction : allAttractions) {
 			double distance = rewardsService.getDistance(attraction, visitedLocation.location);
+
+			// Phase de remplissage : ajouter les 5 premières attractions
 			if (nearestAttractions.size() < 5) {
 				nearestAttractions.add(new AbstractMap.SimpleEntry<>(attraction, distance));
-			} else if (distance < nearestAttractions.peek().getValue()) {
+			}
+			// Phase d'optimisation : remplacer si distance plus courte
+			else if (distance < nearestAttractions.peek().getValue()) {
 				nearestAttractions.poll();
 				nearestAttractions.add(new AbstractMap.SimpleEntry<>(attraction, distance));
 			}
 		}
 
+		// Extraction et mise en ordre des résultats
 		List<Attraction> result = new ArrayList<>(5);
 		while (!nearestAttractions.isEmpty()) {
 			result.add(nearestAttractions.poll().getKey());

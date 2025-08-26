@@ -70,16 +70,21 @@ public class User {
 		visitedLocations.clear();
 	}
 
-	// Ajoute la récompense seulement si TOUTES les attractions existantes sont identiques à la nouvelle
-	// C'est l'inverse de la logique souhaitée qui devrait être "ajouter si cette attraction n'existe pas déjà"
-
-//	public void addUserReward(UserReward userReward) {
-//		if(userRewards.stream().filter(r -> !r.attraction.attractionName.equals(userReward.attraction)).count() == 0) {
-//			userRewards.add(userReward);
-//		}
-//	}
-
+	/**
+	 * Ajoute une récompense à l'utilisateur en évitant les doublons.
+	 *
+	 * Cette méthode implémente la règle métier : un utilisateur ne peut obtenir
+	 * qu'une seule récompense par attraction. Les tentatives de doublons sont
+	 * ignorées silencieusement.
+	 *
+	 * Note : Correction d'un bug critique où l'ancienne logique inversée empêchait
+	 * l'ajout de récompenses. Utilise noneMatch() pour une vérification efficace
+	 * avec court-circuit.
+	 *
+	 * @param userReward la récompense à ajouter
+	 */
 	public void addUserReward(UserReward userReward) {
+		// Vérification de doublon : ajouter seulement si l'attraction n'existe pas déjà
 		if(userRewards.stream().noneMatch(r -> r.attraction.attractionName.equals(userReward.attraction.attractionName))) {
 			userRewards.add(userReward);
 		}
