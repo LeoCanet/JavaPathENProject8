@@ -66,13 +66,14 @@ public class RewardsService {
 			// OPTIMISATION : Index des attractions déjà récompensées (recherche O(1))
 			Set<String> rewardedAttractions = user.getUserRewards().stream()
 					.map(r -> r.attraction.attractionName)
-					.collect(Collectors.toSet());
+					.collect(Collectors.toSet()); // Création du HashSet
 
 			// Parcours optimisé avec interruption précoce
 			for (VisitedLocation visitedLocation : userLocations) {
 				for (Attraction attraction : attractions) {
 
 					// Ignorer si déjà récompensée (évite calculs inutiles)
+                    // Au lieu de parcourir une liste O(n), on fait une recherche directe en 0(1) grace au HashSet
 					if (rewardedAttractions.contains(attraction.attractionName)) {
 						continue;
 					}

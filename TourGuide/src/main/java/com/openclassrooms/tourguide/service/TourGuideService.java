@@ -195,6 +195,8 @@ public class TourGuideService {
 				nearestAttractions.add(new AbstractMap.SimpleEntry<>(attraction, distance));
 			}
 			// Phase d'optimisation : remplacer si distance plus courte
+            // maintiens un min-heap où peek() me donne toujours l'attraction la plus éloignée des 5 actuellement stockées.
+            // Si je trouve mieux, je l'échange
 			else if (distance < nearestAttractions.peek().getValue()) {
 				nearestAttractions.poll();
 				nearestAttractions.add(new AbstractMap.SimpleEntry<>(attraction, distance));
